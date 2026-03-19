@@ -4,3 +4,4 @@ pdf2docx
 img2pdf
 pikepdf
 Pillow
+Flask
