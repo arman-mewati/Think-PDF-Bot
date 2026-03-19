@@ -1,34 +1,33 @@
 import telebot
 import os
-from telebot.types import ReplyKeyboardMarkup
+import threading
+from flask import Flask
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 
-user_files = {}
+# 🔥 Flask app (fake web server for Render)
+app = Flask(__name__)
 
-def main_menu():
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("📂 PDF Tools", "🔄 Convert Tools")
-    markup.add("🧰 Advanced", "🧠 Utility")
-    return markup
+@app.route('/')
+def home():
+    return "Bot is running ✅"
 
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# 🤖 Bot code
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 Welcome to ThinkPDFBot!", reply_markup=main_menu())
+    bot.reply_to(message, "🤖 Welcome to ThinkPDFBot!")
 
-@bot.message_handler(func=lambda msg: True)
-def handle_menu(message):
-    if message.text == "📂 PDF Tools":
-        bot.send_message(message.chat.id, "Send multiple PDFs then type /merge")
+def run_bot():
+    bot.infinity_polling()
 
-    elif message.text == "🔄 Convert Tools":
-        bot.send_message(message.chat.id, "Send PDF to convert to Word")
-
-    elif message.text == "🧰 Advanced":
-        bot.send_message(message.chat.id, "Advanced tools coming soon 🚀")
-
-    elif message.text == "🧠 Utility":
-        bot.send_message(message.chat.id, "Utility tools coming soon ⚙️")
-
-bot.polling()
+# 🔁 Run both together
+if __name__ == "__main__":
+    t1 = threading.Thread(target=run_web)
+    t1.start()
+    
+    run_bot()
