@@ -1,0 +1,6 @@
+pyTelegramBotAPI
+PyPDF2
+pdf2docx
+img2pdf
+pikepdf
+Pillow
