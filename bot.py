@@ -3,13 +3,14 @@ import os
 import threading
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from PyPDF2 import PdfMerger
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 app = Flask(__name__)
 
-# 🌐 Fake web server (Render fix)
+# 🌐 Web server (Render fix)
 @app.route('/')
 def home():
     return "Bot is running ✅"
@@ -17,6 +18,9 @@ def home():
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
+# 📦 User data store
+user_data = {}
 
 # 🎯 MAIN MENU
 def main_menu():
@@ -36,7 +40,7 @@ def main_menu():
 def start(message):
     bot.send_message(
         message.chat.id,
-        "🤖 Welcome to ThinkPDFBot!\n\nYour all-in-one PDF toolkit.\n\nSelect a category below 👇",
+        "🤖 Welcome to ThinkPDFBot!\n\nYour all-in-one PDF toolkit.\n\nSelect a category 👇",
         reply_markup=main_menu()
     )
 
@@ -44,7 +48,9 @@ def start(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
 
-    # 📂 PDF TOOLS
+    chat_id = call.message.chat.id
+
+    # 📂 PDF TOOLS MENU
     if call.data == "pdf_tools":
         markup = InlineKeyboardMarkup()
         markup.row(
@@ -52,95 +58,83 @@ def callback(call):
             InlineKeyboardButton("✂️ Split PDF", callback_data="split")
         )
         markup.row(
-            InlineKeyboardButton("📉 Compress PDF", callback_data="compress"),
-            InlineKeyboardButton("🔄 Rotate PDF", callback_data="rotate")
-        )
-        markup.row(
             InlineKeyboardButton("🔙 Back", callback_data="back")
         )
 
-        bot.edit_message_text(
-            "📂 PDF Tools\n\nChoose an action:",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=markup
-        )
+        bot.edit_message_text("📂 PDF Tools\n\nChoose an action:",
+                              chat_id, call.message.message_id,
+                              reply_markup=markup)
 
-    # 🔄 CONVERT TOOLS
-    elif call.data == "convert":
-        markup = InlineKeyboardMarkup()
-        markup.row(
-            InlineKeyboardButton("📄 → 📝 PDF to Word", callback_data="pdf_word"),
-            InlineKeyboardButton("🖼️ → 📄 Image to PDF", callback_data="img_pdf")
-        )
-        markup.row(
-            InlineKeyboardButton("🔙 Back", callback_data="back")
-        )
+    # 🔀 MERGE MODE START
+    elif call.data == "merge":
+        user_data[chat_id] = {"mode": "merge", "files": []}
+        bot.send_message(chat_id, "📄 Send multiple PDF files.\n\nWhen done, click /done")
 
-        bot.edit_message_text(
-            "🔄 Convert Tools\n\nSelect conversion type:",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=markup
-        )
-
-    # 🧰 ADVANCED TOOLS
-    elif call.data == "advanced":
-        markup = InlineKeyboardMarkup()
-        markup.row(
-            InlineKeyboardButton("🔒 Protect PDF", callback_data="protect"),
-            InlineKeyboardButton("🔓 Unlock PDF", callback_data="unlock")
-        )
-        markup.row(
-            InlineKeyboardButton("💧 Add Watermark", callback_data="watermark")
-        )
-        markup.row(
-            InlineKeyboardButton("🔙 Back", callback_data="back")
-        )
-
-        bot.edit_message_text(
-            "🧰 Advanced Tools\n\nChoose a feature:",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=markup
-        )
-
-    # 🧠 UTILITY
-    elif call.data == "utility":
-        markup = InlineKeyboardMarkup()
-        markup.row(
-            InlineKeyboardButton("📛 Rename File", callback_data="rename"),
-            InlineKeyboardButton("👁 Preview File", callback_data="preview")
-        )
-        markup.row(
-            InlineKeyboardButton("🔙 Back", callback_data="back")
-        )
-
-        bot.edit_message_text(
-            "🧠 Utility Tools\n\nSelect an option:",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=markup
-        )
-
-    # 🔙 BACK BUTTON
+    # 🔙 BACK
     elif call.data == "back":
         bot.edit_message_text(
-            "🤖 Welcome to ThinkPDFBot!\n\nYour all-in-one PDF toolkit.\n\nSelect a category below 👇",
-            call.message.chat.id,
+            "🤖 Welcome to ThinkPDFBot!\n\nSelect a category 👇",
+            chat_id,
             call.message.message_id,
             reply_markup=main_menu()
         )
 
-    # 🚧 FEATURES (COMING SOON PLACEHOLDER)
-    elif call.data in ["merge", "split", "compress", "rotate",
-                       "pdf_word", "img_pdf",
-                       "protect", "unlock", "watermark",
-                       "rename", "preview"]:
-        
-        bot.answer_callback_query(call.id, "Feature coming soon 🚀")
+# 📥 HANDLE FILES
+@bot.message_handler(content_types=['document'])
+def handle_docs(message):
+    chat_id = message.chat.id
 
-# 🔁 RUN BOT
+    if chat_id not in user_data or user_data[chat_id]["mode"] != "merge":
+        bot.reply_to(message, "❌ Please select Merge option first")
+        return
+
+    if not message.document.file_name.endswith('.pdf'):
+        bot.reply_to(message, "❌ Only PDF files allowed")
+        return
+
+    file_info = bot.get_file(message.document.file_id)
+    downloaded = bot.download_file(file_info.file_path)
+
+    file_name = f"{chat_id}_{len(user_data[chat_id]['files'])}.pdf"
+
+    with open(file_name, 'wb') as f:
+        f.write(downloaded)
+
+    user_data[chat_id]["files"].append(file_name)
+
+    bot.reply_to(message, f"✅ File added ({len(user_data[chat_id]['files'])})")
+
+# 🏁 DONE COMMAND → MERGE
+@bot.message_handler(commands=['done'])
+def done(message):
+    chat_id = message.chat.id
+
+    if chat_id not in user_data or len(user_data[chat_id]["files"]) < 2:
+        bot.reply_to(message, "❌ Send at least 2 PDF files")
+        return
+
+    bot.send_message(chat_id, "⏳ Merging PDFs...")
+
+    merger = PdfMerger()
+
+    for pdf in user_data[chat_id]["files"]:
+        merger.append(pdf)
+
+    output = f"{chat_id}_merged.pdf"
+    merger.write(output)
+    merger.close()
+
+    with open(output, 'rb') as f:
+        bot.send_document(chat_id, f)
+
+    # 🧹 cleanup
+    for file in user_data[chat_id]["files"]:
+        os.remove(file)
+
+    os.remove(output)
+    user_data.pop(chat_id)
+
+# 🔁 RUN
 def run_bot():
     bot.infinity_polling()
 
