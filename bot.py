@@ -3,7 +3,7 @@ import os
 import threading
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from PyPDF2 import PdfMerger
+from PyPDF2 import PdfMerger, PdfReader, PdfWriter
 from pdf2docx import Converter
 import img2pdf
 import pikepdf
@@ -23,255 +23,226 @@ def run_web():
 
 user_data = {}
 
-# 🎯 MAIN MENU
+# 🎯 MENU
 def main_menu():
-    markup = InlineKeyboardMarkup()
-    markup.row(
-        InlineKeyboardButton("📂 PDF Tools", callback_data="pdf_tools"),
-        InlineKeyboardButton("🔄 Convert", callback_data="convert")
-    )
-    markup.row(
-        InlineKeyboardButton("🧰 Advanced", callback_data="advanced")
-    )
-    return markup
+    m = InlineKeyboardMarkup()
+    m.row(InlineKeyboardButton("📂 PDF Tools", callback_data="pdf_tools"),
+          InlineKeyboardButton("🔄 Convert", callback_data="convert"))
+    m.row(InlineKeyboardButton("🧰 Advanced", callback_data="advanced"))
+    return m
 
 @bot.message_handler(commands=['start'])
-def start(message):
-    bot.send_message(
-        message.chat.id,
-        "🤖 Welcome to ThinkPDFBot!\n\nSelect a category 👇",
-        reply_markup=main_menu()
-    )
+def start(msg):
+    bot.send_message(msg.chat.id,
+                     "🤖 ThinkPDFBot\n\nAll-in-one PDF toolkit",
+                     reply_markup=main_menu())
 
-# 🔘 BUTTON HANDLER
-@bot.callback_query_handler(func=lambda call: True)
-def callback(call):
-    chat_id = call.message.chat.id
+# 🔘 BUTTONS
+@bot.callback_query_handler(func=lambda c: True)
+def cb(call):
+    cid = call.message.chat.id
 
-    # PDF TOOLS
     if call.data == "pdf_tools":
-        markup = InlineKeyboardMarkup()
-        markup.row(
-            InlineKeyboardButton("📄 Merge PDFs", callback_data="merge")
-        )
-        markup.row(
-            InlineKeyboardButton("🔙 Back", callback_data="back")
-        )
+        m = InlineKeyboardMarkup()
+        m.row(InlineKeyboardButton("📄 Merge", callback_data="merge"))
+        m.row(InlineKeyboardButton("📉 Compress", callback_data="compress"))
+        m.row(InlineKeyboardButton("🔙 Back", callback_data="back"))
+        bot.edit_message_text("PDF Tools", cid, call.message.message_id, reply_markup=m)
 
-        bot.edit_message_text("📂 PDF Tools", chat_id, call.message.message_id, reply_markup=markup)
-
-    # CONVERT
     elif call.data == "convert":
-        markup = InlineKeyboardMarkup()
-        markup.row(
-            InlineKeyboardButton("📄 → 📝 PDF to Word", callback_data="pdf_word"),
-            InlineKeyboardButton("🖼️ → 📄 Image to PDF", callback_data="img_pdf")
-        )
-        markup.row(
-            InlineKeyboardButton("🔙 Back", callback_data="back")
-        )
+        m = InlineKeyboardMarkup()
+        m.row(InlineKeyboardButton("PDF → Word", callback_data="pdf_word"))
+        m.row(InlineKeyboardButton("Image → PDF", callback_data="img_pdf"))
+        m.row(InlineKeyboardButton("🔙 Back", callback_data="back"))
+        bot.edit_message_text("Convert", cid, call.message.message_id, reply_markup=m)
 
-        bot.edit_message_text("🔄 Convert Tools", chat_id, call.message.message_id, reply_markup=markup)
-
-    # ADVANCED
     elif call.data == "advanced":
-        markup = InlineKeyboardMarkup()
-        markup.row(
-            InlineKeyboardButton("🔒 Protect PDF", callback_data="protect"),
-            InlineKeyboardButton("🔓 Unlock PDF", callback_data="unlock")
-        )
-        markup.row(
-            InlineKeyboardButton("🔙 Back", callback_data="back")
-        )
+        m = InlineKeyboardMarkup()
+        m.row(InlineKeyboardButton("🔒 Protect", callback_data="protect"),
+              InlineKeyboardButton("🔓 Unlock", callback_data="unlock"))
+        m.row(InlineKeyboardButton("💧 Watermark", callback_data="watermark"))
+        m.row(InlineKeyboardButton("🔙 Back", callback_data="back"))
+        bot.edit_message_text("Advanced", cid, call.message.message_id, reply_markup=m)
 
-        bot.edit_message_text("🧰 Advanced Tools", chat_id, call.message.message_id, reply_markup=markup)
+    elif call.data in ["merge","img_pdf"]:
+        user_data[cid] = {"mode": call.data, "files": []}
+        bot.send_message(cid, "Send files then /done")
 
-    # MODES
-    elif call.data == "merge":
-        user_data[chat_id] = {"mode": "merge", "files": []}
-        bot.send_message(chat_id, "📄 Send PDFs then /done")
+    elif call.data == "compress":
+        user_data[cid] = {"mode": "compress"}
+        bot.send_message(cid, "Send PDF to compress")
 
     elif call.data == "pdf_word":
-        user_data[chat_id] = {"mode": "pdf_word"}
-        bot.send_message(chat_id, "📄 Send a PDF")
-
-    elif call.data == "img_pdf":
-        user_data[chat_id] = {"mode": "img_pdf", "files": []}
-        bot.send_message(chat_id, "🖼️ Send images then /done")
+        user_data[cid] = {"mode": "pdf_word"}
+        bot.send_message(cid, "Send PDF")
 
     elif call.data == "protect":
-        user_data[chat_id] = {"mode": "protect"}
-        bot.send_message(chat_id, "📄 Send PDF to protect")
+        user_data[cid] = {"mode": "protect"}
+        bot.send_message(cid, "Send PDF")
 
     elif call.data == "unlock":
-        user_data[chat_id] = {"mode": "unlock"}
-        bot.send_message(chat_id, "📄 Send locked PDF")
+        user_data[cid] = {"mode": "unlock"}
+        bot.send_message(cid, "Send locked PDF")
+
+    elif call.data == "watermark":
+        user_data[cid] = {"mode": "watermark"}
+        bot.send_message(cid, "Send PDF")
 
     elif call.data == "back":
-        bot.edit_message_text(
-            "🤖 Welcome to ThinkPDFBot!\n\nSelect a category 👇",
-            chat_id,
-            call.message.message_id,
-            reply_markup=main_menu()
-        )
+        bot.edit_message_text("Main Menu", cid, call.message.message_id, reply_markup=main_menu())
 
-# 📥 FILE HANDLER
-@bot.message_handler(content_types=['document', 'photo'])
-def handle_files(message):
-    chat_id = message.chat.id
+# 📥 FILES
+@bot.message_handler(content_types=['document','photo'])
+def files(msg):
+    cid = msg.chat.id
+    if cid not in user_data: return
 
-    if chat_id not in user_data:
-        bot.reply_to(message, "❌ Select tool first")
-        return
+    mode = user_data[cid]["mode"]
 
-    mode = user_data[chat_id]["mode"]
-
-    # MERGE
-    if mode == "merge":
-        if not message.document or not message.document.file_name.endswith('.pdf'):
-            return bot.reply_to(message, "❌ PDF only")
-
-        file_info = bot.get_file(message.document.file_id)
-        data = bot.download_file(file_info.file_path)
-
-        name = f"{chat_id}_{len(user_data[chat_id]['files'])}.pdf"
-        open(name, 'wb').write(data)
-
-        user_data[chat_id]["files"].append(name)
-        bot.reply_to(message, "✅ Added")
-
-    # PDF → WORD
-    elif mode == "pdf_word":
-        file_info = bot.get_file(message.document.file_id)
-        data = bot.download_file(file_info.file_path)
-
-        open(f"{chat_id}.pdf", 'wb').write(data)
-
-        bot.send_message(chat_id, "⏳ Converting...")
-
-        cv = Converter(f"{chat_id}.pdf")
-        cv.convert(f"{chat_id}.docx")
-        cv.close()
-
-        bot.send_document(chat_id, open(f"{chat_id}.docx", 'rb'))
-
-        os.remove(f"{chat_id}.pdf")
-        os.remove(f"{chat_id}.docx")
-        user_data.pop(chat_id)
-
-    # IMAGE → PDF
-    elif mode == "img_pdf":
-        file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+    # MERGE / IMG
+    if mode in ["merge","img_pdf"]:
+        file_id = msg.document.file_id if msg.document else msg.photo[-1].file_id
         file_info = bot.get_file(file_id)
         data = bot.download_file(file_info.file_path)
 
-        name = f"{chat_id}_{len(user_data[chat_id]['files'])}.jpg"
-        open(name, 'wb').write(data)
+        name = f"{cid}_{len(user_data[cid]['files'])}.dat"
+        open(name,'wb').write(data)
 
-        user_data[chat_id]["files"].append(name)
-        bot.reply_to(message, "✅ Image added")
+        user_data[cid]["files"].append(name)
+        bot.reply_to(msg,"Added")
 
-    # PROTECT PDF
-    elif mode == "protect":
-        file_info = bot.get_file(message.document.file_id)
+    # COMPRESS
+    elif mode == "compress":
+        file_info = bot.get_file(msg.document.file_id)
         data = bot.download_file(file_info.file_path)
 
-        open(f"{chat_id}.pdf", 'wb').write(data)
+        open(f"{cid}.pdf",'wb').write(data)
 
-        user_data[chat_id] = {"mode": "set_password"}
-        bot.send_message(chat_id, "🔑 Send password to lock PDF")
+        bot.send_message(cid,"⏳ Compressing...")
 
-    # UNLOCK PDF
-    elif mode == "unlock":
-        file_info = bot.get_file(message.document.file_id)
+        reader = PdfReader(f"{cid}.pdf")
+        writer = PdfWriter()
+
+        for page in reader.pages:
+            writer.add_page(page)
+
+        writer.write(f"{cid}_c.pdf")
+
+        bot.send_document(cid, open(f"{cid}_c.pdf",'rb'))
+
+        os.remove(f"{cid}.pdf")
+        os.remove(f"{cid}_c.pdf")
+        user_data.pop(cid)
+
+    # PDF→WORD
+    elif mode == "pdf_word":
+        file_info = bot.get_file(msg.document.file_id)
         data = bot.download_file(file_info.file_path)
 
-        open(f"{chat_id}.pdf", 'wb').write(data)
+        open(f"{cid}.pdf",'wb').write(data)
+        cv = Converter(f"{cid}.pdf")
+        cv.convert(f"{cid}.docx")
+        cv.close()
 
-        user_data[chat_id] = {"mode": "unlock_pass"}
-        bot.send_message(chat_id, "🔑 Send password to unlock")
+        bot.send_document(cid, open(f"{cid}.docx",'rb'))
 
-# 🔑 TEXT HANDLER (PASSWORD)
+        os.remove(f"{cid}.pdf")
+        os.remove(f"{cid}.docx")
+        user_data.pop(cid)
+
+    # PROTECT / UNLOCK / WATERMARK
+    elif mode in ["protect","unlock","watermark"]:
+        file_info = bot.get_file(msg.document.file_id)
+        data = bot.download_file(file_info.file_path)
+
+        open(f"{cid}.pdf",'wb').write(data)
+
+        if mode=="protect":
+            user_data[cid]={"mode":"set_pass"}
+            bot.send_message(cid,"Send password")
+
+        elif mode=="unlock":
+            user_data[cid]={"mode":"unlock_pass"}
+            bot.send_message(cid,"Send password")
+
+        elif mode=="watermark":
+            user_data[cid]={"mode":"watermark_text"}
+            bot.send_message(cid,"Send watermark text")
+
+# 🔤 TEXT
 @bot.message_handler(func=lambda m: True)
-def text_handler(message):
-    chat_id = message.chat.id
+def text(msg):
+    cid = msg.chat.id
+    if cid not in user_data: return
 
-    if chat_id not in user_data:
-        return
+    mode = user_data[cid]["mode"]
 
-    mode = user_data[chat_id]["mode"]
-
-    # SET PASSWORD
-    if mode == "set_password":
-        password = message.text
-
-        pdf = pikepdf.open(f"{chat_id}.pdf")
-        pdf.save(f"{chat_id}_locked.pdf", encryption=pikepdf.Encryption(owner=password, user=password))
+    if mode=="set_pass":
+        pdf=pikepdf.open(f"{cid}.pdf")
+        pdf.save(f"{cid}_lock.pdf",encryption=pikepdf.Encryption(owner=msg.text,user=msg.text))
         pdf.close()
+        bot.send_document(cid,open(f"{cid}_lock.pdf",'rb'))
 
-        bot.send_document(chat_id, open(f"{chat_id}_locked.pdf", 'rb'))
-
-        os.remove(f"{chat_id}.pdf")
-        os.remove(f"{chat_id}_locked.pdf")
-        user_data.pop(chat_id)
-
-    # UNLOCK PDF
-    elif mode == "unlock_pass":
-        password = message.text
-
+    elif mode=="unlock_pass":
         try:
-            pdf = pikepdf.open(f"{chat_id}.pdf", password=password)
-            pdf.save(f"{chat_id}_unlocked.pdf")
+            pdf=pikepdf.open(f"{cid}.pdf",password=msg.text)
+            pdf.save(f"{cid}_un.pdf")
             pdf.close()
-
-            bot.send_document(chat_id, open(f"{chat_id}_unlocked.pdf", 'rb'))
-
-            os.remove(f"{chat_id}.pdf")
-            os.remove(f"{chat_id}_unlocked.pdf")
-            user_data.pop(chat_id)
-
+            bot.send_document(cid,open(f"{cid}_un.pdf",'rb'))
         except:
-            bot.send_message(chat_id, "❌ Wrong password")
+            bot.send_message(cid,"Wrong password")
 
-# 🏁 DONE
+    elif mode=="watermark_text":
+        reader=PdfReader(f"{cid}.pdf")
+        writer=PdfWriter()
+
+        for page in reader.pages:
+            writer.add_page(page)
+
+        writer.add_metadata({"/Watermark": msg.text})
+
+        writer.write(f"{cid}_wm.pdf")
+        bot.send_document(cid,open(f"{cid}_wm.pdf",'rb'))
+
+    # cleanup
+    for f in os.listdir():
+        if str(cid) in f:
+            try: os.remove(f)
+            except: pass
+
+    user_data.pop(cid, None)
+
+# DONE
 @bot.message_handler(commands=['done'])
-def done(message):
-    chat_id = message.chat.id
+def done(msg):
+    cid = msg.chat.id
+    if cid not in user_data: return
 
-    if chat_id not in user_data:
-        return
+    mode=user_data[cid]["mode"]
 
-    mode = user_data[chat_id]["mode"]
-
-    if mode == "merge":
-        merger = PdfMerger()
-        for pdf in user_data[chat_id]["files"]:
-            merger.append(pdf)
-
-        output = f"{chat_id}_merged.pdf"
-        merger.write(output)
+    if mode=="merge":
+        merger=PdfMerger()
+        for f in user_data[cid]["files"]:
+            merger.append(f)
+        out=f"{cid}_m.pdf"
+        merger.write(out)
         merger.close()
+        bot.send_document(cid,open(out,'rb'))
 
-        bot.send_document(chat_id, open(output, 'rb'))
+    elif mode=="img_pdf":
+        out=f"{cid}_i.pdf"
+        open(out,'wb').write(img2pdf.convert(user_data[cid]["files"]))
+        bot.send_document(cid,open(out,'rb'))
 
-    elif mode == "img_pdf":
-        output = f"{chat_id}_images.pdf"
-        with open(output, "wb") as f:
-            f.write(img2pdf.convert(user_data[chat_id]["files"]))
-
-        bot.send_document(chat_id, open(output, 'rb'))
-
-    # CLEANUP
-    for f in user_data[chat_id]["files"]:
+    for f in user_data[cid]["files"]:
         os.remove(f)
-
-    os.remove(output)
-    user_data.pop(chat_id)
+    os.remove(out)
+    user_data.pop(cid)
 
 # RUN
 def run_bot():
     bot.infinity_polling()
 
-if __name__ == "__main__":
+if __name__=="__main__":
     threading.Thread(target=run_web).start()
     run_bot()
