@@ -5,6 +5,7 @@ from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from PyPDF2 import PdfMerger
 from pdf2docx import Converter
+import img2pdf
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -60,6 +61,9 @@ def callback(call):
             InlineKeyboardButton("📄 → 📝 PDF to Word", callback_data="pdf_word")
         )
         markup.row(
+            InlineKeyboardButton("🖼️ → 📄 Image to PDF", callback_data="img_pdf")
+        )
+        markup.row(
             InlineKeyboardButton("🔙 Back", callback_data="back")
         )
 
@@ -71,7 +75,11 @@ def callback(call):
 
     elif call.data == "pdf_word":
         user_data[chat_id] = {"mode": "pdf_word"}
-        bot.send_message(chat_id, "📄 Send a PDF file to convert into Word")
+        bot.send_message(chat_id, "📄 Send a PDF file")
+
+    elif call.data == "img_pdf":
+        user_data[chat_id] = {"mode": "img_pdf", "files": []}
+        bot.send_message(chat_id, "🖼️ Send images (JPG/PNG) then type /done")
 
     elif call.data == "back":
         bot.edit_message_text(
@@ -82,20 +90,20 @@ def callback(call):
         )
 
 # 📥 HANDLE FILES
-@bot.message_handler(content_types=['document'])
-def handle_docs(message):
+@bot.message_handler(content_types=['document', 'photo'])
+def handle_files(message):
     chat_id = message.chat.id
 
     if chat_id not in user_data:
-        bot.reply_to(message, "❌ Please choose a tool first")
+        bot.reply_to(message, "❌ Choose a tool first")
         return
 
     mode = user_data[chat_id]["mode"]
 
     # 🔀 MERGE
     if mode == "merge":
-        if not message.document.file_name.endswith('.pdf'):
-            bot.reply_to(message, "❌ Only PDF files allowed")
+        if not message.document or not message.document.file_name.endswith('.pdf'):
+            bot.reply_to(message, "❌ Send PDF files only")
             return
 
         file_info = bot.get_file(message.document.file_id)
@@ -107,16 +115,15 @@ def handle_docs(message):
             f.write(downloaded)
 
         user_data[chat_id]["files"].append(file_name)
-
-        bot.reply_to(message, f"✅ File added ({len(user_data[chat_id]['files'])})")
+        bot.reply_to(message, f"✅ Added ({len(user_data[chat_id]['files'])})")
 
     # 🔄 PDF → WORD
     elif mode == "pdf_word":
-        if not message.document.file_name.endswith('.pdf'):
-            bot.reply_to(message, "❌ Send a valid PDF file")
+        if not message.document or not message.document.file_name.endswith('.pdf'):
+            bot.reply_to(message, "❌ Send PDF only")
             return
 
-        bot.send_message(chat_id, "⏳ Converting to Word...")
+        bot.send_message(chat_id, "⏳ Converting...")
 
         file_info = bot.get_file(message.document.file_id)
         downloaded = bot.download_file(file_info.file_path)
@@ -138,33 +145,78 @@ def handle_docs(message):
         os.remove(output_file)
         user_data.pop(chat_id)
 
-# 🏁 DONE MERGE
+    # 🖼️ IMAGE → PDF
+    elif mode == "img_pdf":
+        file_id = None
+
+        if message.photo:
+            file_id = message.photo[-1].file_id
+        elif message.document:
+            file_id = message.document.file_id
+
+        file_info = bot.get_file(file_id)
+        downloaded = bot.download_file(file_info.file_path)
+
+        file_name = f"{chat_id}_{len(user_data[chat_id]['files'])}.jpg"
+
+        with open(file_name, 'wb') as f:
+            f.write(downloaded)
+
+        user_data[chat_id]["files"].append(file_name)
+        bot.reply_to(message, f"✅ Image added ({len(user_data[chat_id]['files'])})")
+
+# 🏁 DONE COMMAND
 @bot.message_handler(commands=['done'])
 def done(message):
     chat_id = message.chat.id
 
-    if chat_id not in user_data or len(user_data[chat_id].get("files", [])) < 2:
-        bot.reply_to(message, "❌ Send at least 2 PDFs")
+    if chat_id not in user_data:
         return
 
-    bot.send_message(chat_id, "⏳ Merging PDFs...")
+    mode = user_data[chat_id]["mode"]
 
-    merger = PdfMerger()
+    # MERGE
+    if mode == "merge":
+        if len(user_data[chat_id]["files"]) < 2:
+            bot.reply_to(message, "❌ Send at least 2 PDFs")
+            return
 
-    for pdf in user_data[chat_id]["files"]:
-        merger.append(pdf)
+        bot.send_message(chat_id, "⏳ Merging...")
 
-    output = f"{chat_id}_merged.pdf"
-    merger.write(output)
-    merger.close()
+        merger = PdfMerger()
+        for pdf in user_data[chat_id]["files"]:
+            merger.append(pdf)
 
-    with open(output, 'rb') as f:
-        bot.send_document(chat_id, f)
+        output = f"{chat_id}_merged.pdf"
+        merger.write(output)
+        merger.close()
 
+        with open(output, 'rb') as f:
+            bot.send_document(chat_id, f)
+
+    # IMAGE → PDF
+    elif mode == "img_pdf":
+        if len(user_data[chat_id]["files"]) < 1:
+            bot.reply_to(message, "❌ Send at least 1 image")
+            return
+
+        bot.send_message(chat_id, "⏳ Creating PDF...")
+
+        output = f"{chat_id}_images.pdf"
+
+        with open(output, "wb") as f:
+            f.write(img2pdf.convert(user_data[chat_id]["files"]))
+
+        with open(output, 'rb') as f:
+            bot.send_document(chat_id, f)
+
+    # CLEANUP
     for file in user_data[chat_id]["files"]:
         os.remove(file)
 
-    os.remove(output)
+    if os.path.exists(output):
+        os.remove(output)
+
     user_data.pop(chat_id)
 
 # 🔁 RUN
